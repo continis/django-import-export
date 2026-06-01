@@ -744,7 +744,7 @@ class ExportMixin(BaseExportMixin, ImportExportMixinBase):
         form = form_type(
             self.get_export_formats(),
             self.get_export_resource_classes(request),
-            data=request.POST or None,
+            data=request.POST if request.method == "POST" else None,
         )
 
         return self.init_request_context_data(request, form) if with_context else form
