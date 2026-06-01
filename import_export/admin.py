@@ -737,6 +737,18 @@ class ExportMixin(BaseExportMixin, ImportExportMixinBase):
         """
         return self.export_form_class
 
+    def get_form(self, request, with_context=False, **kwargs):
+        """Expose the export form for overrides."""
+        form_type = self.get_export_form_class()
+
+        form = form_type(
+            self.get_export_formats(),
+            self.get_export_resource_classes(request),
+            data=request.POST or None,
+        )
+
+        return self.init_request_context_data(request, form) if with_context else form
+
     def export_action(self, request):
         """
         Handles the default workflow for both the export form and the
@@ -745,17 +757,13 @@ class ExportMixin(BaseExportMixin, ImportExportMixinBase):
         if not self.has_export_permission(request):
             raise PermissionDenied
 
-        form_type = self.get_export_form_class()
         formats = self.get_export_formats()
         queryset = self.get_export_queryset(request)
         if self.is_skip_export_form_enabled():
             return self._do_file_export(formats[0](), request, queryset)
 
-        form = form_type(
-            formats,
-            self.get_export_resource_classes(request),
-            data=request.POST or None,
-        )
+        context = self.get_form(request, with_context=True)
+        form = context.get("form")
         if request.POST and f"{FORM_FIELD_PREFIX}export_items" in request.POST:
             # this field is instantiated if the export is POSTed from the
             # 'action' drop down
@@ -786,7 +794,7 @@ class ExportMixin(BaseExportMixin, ImportExportMixinBase):
             except (ValueError, FieldError) as e:
                 messages.error(request, str(e))
 
-        context = self.init_request_context_data(request, form)
+        context.update(form=form)
         request.current_app = self.admin_site.name
         return TemplateResponse(request, [self.export_template_name], context=context)
 
