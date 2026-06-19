@@ -5,14 +5,11 @@ description = "Continis Fork: Django application and library for importing and e
 authors = ["Bojan Mihelac <bojan@informatikamihelac.com>"]
 license = "BSD-3-Clause"
 readme = "README.rst"
-homepage = "https://django-import-export.readthedocs.io/en/stable/"
-repository = "https://github.com/django-import-export/django-import-export"
-keywords = ["django", "import", "export"]
 packages = [{ include = "import_export" }]
 
 [tool.poetry.dependencies]
 python = ">=3.10"
-Django = ">=4.2"
+Django = ">=5.2"
 diff-match-patch = "20241021"
 tablib = ">=3.7.0"
 

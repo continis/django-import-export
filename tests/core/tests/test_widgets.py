@@ -3,15 +3,16 @@ from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from unittest import mock
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
-import django
+import tablib
 from core.models import Author, Book, Category
-from core.tests.utils import ignore_utcnow_deprecation_warning
+from django.db import connection
 from django.test import TestCase
-from django.test.utils import override_settings
+from django.test.utils import CaptureQueriesContext, override_settings
 from django.utils import timezone
 
-from import_export import widgets
+from import_export import fields, resources, widgets
 from import_export.exceptions import WidgetError
 
 
@@ -26,17 +27,7 @@ class WidgetTest(TestCase):
         self.assertEqual("1", self.widget.render(1))
 
 
-class RowDeprecationTestMixin:
-    def test_render_row_deprecation(self):
-        with self.assertWarnsRegex(
-            DeprecationWarning,
-            r"^The 'obj' parameter is deprecated and "
-            "will be removed in a future release$",
-        ):
-            self.widget.render(Book.objects.none(), obj={"a": 1})
-
-
-class CharWidgetTest(TestCase, RowDeprecationTestMixin):
+class CharWidgetTest(TestCase):
     def setUp(self):
         self.widget = widgets.CharWidget()
 
@@ -59,7 +50,7 @@ class CharWidgetTest(TestCase, RowDeprecationTestMixin):
         self.assertEqual("", self.widget.clean(None))
 
 
-class BooleanWidgetTest(TestCase, RowDeprecationTestMixin):
+class BooleanWidgetTest(TestCase):
     def setUp(self):
         self.widget = widgets.BooleanWidget()
 
@@ -115,7 +106,7 @@ class CustomDate(date):
     pass
 
 
-class DateWidgetTest(TestCase, RowDeprecationTestMixin):
+class DateWidgetTest(TestCase):
     def setUp(self):
         self.date = date(2012, 8, 13)
         self.widget = widgets.DateWidget("%d.%m.%Y")
@@ -179,7 +170,7 @@ class CustomDateTime(datetime):
     pass
 
 
-class DateTimeWidgetTest(TestCase, RowDeprecationTestMixin):
+class DateTimeWidgetTest(TestCase):
     def setUp(self):
         self.datetime = datetime(2012, 8, 13, 18, 0, 0)
         self.widget = widgets.DateTimeWidget("%d.%m.%Y %H:%M:%S")
@@ -215,7 +206,6 @@ class DateTimeWidgetTest(TestCase, RowDeprecationTestMixin):
             "time data '2021-05-01' does not match format 'x'"
         )
 
-    @ignore_utcnow_deprecation_warning
     @override_settings(USE_TZ=True, TIME_ZONE="Europe/Ljubljana")
     def test_use_tz(self):
         import pytz
@@ -224,22 +214,13 @@ class DateTimeWidgetTest(TestCase, RowDeprecationTestMixin):
         self.assertEqual(self.widget.render(utc_dt), "13.08.2012 20:00:00")
         self.assertEqual(self.widget.clean("13.08.2012 20:00:00"), utc_dt)
 
-    @ignore_utcnow_deprecation_warning
     @override_settings(USE_TZ=True, TIME_ZONE="Europe/Ljubljana")
     def test_clean_returns_tz_aware_datetime_when_naive_datetime_passed(self):
-        import pytz
-
         # issue 1165
-        if django.VERSION >= (5, 0):
-            from zoneinfo import ZoneInfo
-
-            tz = ZoneInfo("Europe/Ljubljana")
-        else:
-            tz = pytz.timezone("Europe/Ljubljana")
+        tz = ZoneInfo("Europe/Ljubljana")
         target_dt = timezone.make_aware(self.datetime, tz)
         self.assertEqual(target_dt, self.widget.clean(self.datetime))
 
-    @ignore_utcnow_deprecation_warning
     @override_settings(USE_TZ=True, TIME_ZONE="Europe/Ljubljana")
     def test_clean_handles_tz_aware_datetime(self):
         import pytz
@@ -293,7 +274,7 @@ class CustomTime(time):
     pass
 
 
-class TimeWidgetTest(TestCase, RowDeprecationTestMixin):
+class TimeWidgetTest(TestCase):
     def setUp(self):
         self.time = time(20, 15, 0)
         self.widget = widgets.TimeWidget("%H:%M:%S")
@@ -338,7 +319,7 @@ class TimeWidgetTest(TestCase, RowDeprecationTestMixin):
         self.assertEqual(self.time, self.widget.clean(self.time))
 
 
-class DurationWidgetTest(TestCase, RowDeprecationTestMixin):
+class DurationWidgetTest(TestCase):
     def setUp(self):
         self.duration = timedelta(hours=1, minutes=57, seconds=0)
         self.widget = widgets.DurationWidget()
@@ -376,7 +357,7 @@ class DurationWidgetTest(TestCase, RowDeprecationTestMixin):
         mock_logger.debug.assert_called_with("err")
 
 
-class NumberWidgetTest(TestCase, RowDeprecationTestMixin):
+class NumberWidgetTest(TestCase):
     def setUp(self):
         self.value = 11.111
         self.widget = widgets.NumberWidget()
@@ -411,7 +392,7 @@ class NumberWidgetTest(TestCase, RowDeprecationTestMixin):
         self.assertEqual("", self.widget_coerce_to_string.render(None))
 
 
-class FloatWidgetTest(TestCase, RowDeprecationTestMixin):
+class FloatWidgetTest(TestCase):
     def setUp(self):
         self.value = 11.111
         self.widget = widgets.FloatWidget()
@@ -456,7 +437,7 @@ class FloatWidgetTest(TestCase, RowDeprecationTestMixin):
         self.assertEqual(self.widget_coerce_to_string.render(self.value), "11,111")
 
 
-class DecimalWidgetTest(TestCase, RowDeprecationTestMixin):
+class DecimalWidgetTest(TestCase):
     def setUp(self):
         self.value = Decimal("11.111")
         self.widget = widgets.DecimalWidget()
@@ -505,7 +486,7 @@ class DecimalWidgetTest(TestCase, RowDeprecationTestMixin):
         self.assertEqual(self.widget.render(self.value), "11,111")
 
 
-class IntegerWidgetTest(TestCase, RowDeprecationTestMixin):
+class IntegerWidgetTest(TestCase):
     def setUp(self):
         self.value = 0
         self.widget = widgets.IntegerWidget()
@@ -551,7 +532,7 @@ class IntegerWidgetTest(TestCase, RowDeprecationTestMixin):
         self.assertEqual(self.widget_coerce_to_string.render(self.value), "0")
 
 
-class ForeignKeyWidgetTest(TestCase, RowDeprecationTestMixin):
+class ForeignKeyWidgetTest(TestCase):
     def setUp(self):
         self.widget = widgets.ForeignKeyWidget(Author)
         self.natural_key_author_widget = widgets.ForeignKeyWidget(
@@ -672,7 +653,210 @@ class ForeignKeyWidgetTest(TestCase, RowDeprecationTestMixin):
         )
 
 
-class ManyToManyWidget(TestCase, RowDeprecationTestMixin):
+class CachedForeignKeyWidgetTest(TestCase):
+    def setUp(self):
+        self.widget = widgets.CachedForeignKeyWidget(Author)
+        self.natural_key_author_widget = widgets.CachedForeignKeyWidget(
+            Author, use_natural_foreign_keys=True
+        )
+        self.natural_key_book_widget = widgets.CachedForeignKeyWidget(
+            Book, use_natural_foreign_keys=True
+        )
+        self.author = Author.objects.create(name="Foo")
+        self.book = Book.objects.create(name="Bar", author=self.author)
+
+    def tearDown(self):
+        if hasattr(self.widget, "_cached_qs"):
+            del self.widget._cached_qs
+        if hasattr(self.natural_key_author_widget, "_cached_qs"):
+            del self.natural_key_author_widget._cached_qs
+        if hasattr(self.natural_key_book_widget, "_cached_qs"):
+            del self.natural_key_book_widget._cached_qs
+
+    def test_clean(self):
+        self.assertEqual(self.widget.clean(self.author.id), self.author)
+
+    def test_clean_with_string_pk(self):
+        """Ensure lookup works when value is a string (as from CSV import)."""
+        self.assertEqual(self.widget.clean(str(self.author.id)), self.author)
+
+    def test_clean_empty(self):
+        self.assertEqual(self.widget.clean(""), None)
+
+    def test_render(self):
+        self.assertEqual(self.widget.render(self.author), self.author.pk)
+
+    def test_render_empty(self):
+        self.assertEqual(self.widget.render(None), "")
+
+    def test_cache_hit(self):
+        author2 = Author.objects.create(name="Baz")
+        with CaptureQueriesContext(connection) as ctx:
+            self.assertEqual(self.widget.clean(self.author.id), self.author)  # query
+            self.assertEqual(self.widget.clean(author2.id), author2)  # cache hit
+            self.assertEqual(len(ctx.captured_queries), 1)
+
+        with CaptureQueriesContext(connection) as ctx:
+            self.assertEqual(
+                self.widget.clean(self.author.id), self.author
+            )  # cache hit
+            self.assertEqual(self.widget.clean(author2.id), author2)  # cache hit
+            self.assertEqual(len(ctx.captured_queries), 0)
+
+    def test_cache_is_not_shared_for_different_resource_instances(self):
+        class BookResource(resources.ModelResource):
+            author = fields.Field(
+                attribute="author",
+                column_name="Author",
+                widget=widgets.CachedForeignKeyWidget(Author),
+            )
+
+            class Meta:
+                model = Book
+
+        headers = ["Author"]
+        row = [self.author.id]
+        dataset = tablib.Dataset(row, headers=headers)
+        resource = BookResource()
+
+        self.assertFalse(hasattr(resource.fields["author"].widget, "_cached_qs"))
+        resource.import_data(dataset, dry_run=True)
+        self.assertTrue(hasattr(resource.fields["author"].widget, "_cached_qs"))
+
+        resource2 = BookResource()  # new instance. The cache must be reset
+        self.assertFalse(hasattr(resource2.fields["author"].widget, "_cached_qs"))
+
+    def test_clean_multi_column(self):
+        class BirthdayWidget(widgets.CachedForeignKeyWidget):
+            def get_queryset(self, value, row, *args, **kwargs):
+                return self.model.objects.filter(birthday=row["birthday"])
+
+        author2 = Author.objects.create(name="Foo")
+        author2.birthday = "2016-01-01"
+        author2.save()
+        birthday_widget = BirthdayWidget(Author, "name")
+        row_dict = {"name": "Foo", "birthday": author2.birthday}
+        self.assertEqual(birthday_widget.clean("Foo", row=row_dict), author2)
+
+    def test_invalid_get_queryset(self):
+        class BirthdayWidget(widgets.CachedForeignKeyWidget):
+            def get_queryset(self, value, row):
+                return self.model.objects.filter(birthday=row["birthday"])
+
+        birthday_widget = BirthdayWidget(Author, "name")
+        row_dict = {"name": "Foo", "age": 38}
+        with self.assertRaises(TypeError):
+            birthday_widget.clean("Foo", row=row_dict, row_number=1)
+
+    def test_lookup_multiple_columns(self):
+        # issue 1516 - override the values used to lookup an entry
+        class BookWidget(widgets.CachedForeignKeyWidget):
+            def get_lookup_kwargs(self, value, row, *args, **kwargs):
+                return {"name": row["name"], "author_email": row["authoremail"]}
+
+        target_book = Book.objects.create(
+            name="Baz", author=self.author, author_email="baz@email.com"
+        )
+        row_dict = {"name": "Baz", "authoremail": "baz@email.com"}
+        book_widget = BookWidget(Book, "name")
+        # prove that the overridden kwargs identify a row
+        res = book_widget.clean("non-existent name", row=row_dict)
+        self.assertEqual(target_book, res)
+
+    def test_render_handles_value_error(self):
+        class TestObj:
+            @property
+            def attr(self):
+                raise ValueError("some error")
+
+        t = TestObj()
+        self.widget = widgets.CachedForeignKeyWidget(mock.Mock(), "attr")
+        self.assertIsNone(self.widget.render(t))
+
+    def test_multiple_objects_error(self):
+        Author.objects.create(name=self.author.name)  # an author with duplicated name
+        widget = widgets.CachedForeignKeyWidget(Author, "name")
+
+        with self.assertRaises(Author.MultipleObjectsReturned) as e:
+            widget.clean(self.author.name)
+
+        self.assertEqual(
+            str(e.exception), "get() returned more than one Author -- it returned 2!"
+        )
+
+    def test_object_does_not_exist_error(self):
+        with self.assertRaises(Author.DoesNotExist) as e:
+            self.widget.clean("non-existent-id")
+
+        self.assertEqual(str(e.exception), "Author matching query does not exist.")
+
+    def test_author_natural_key_clean(self):
+        """
+        Ensure that we can import an author by its natural key. Note that
+        this will always need to be an iterable.
+        Generally this will be rendered as a list.
+        """
+        self.assertEqual(
+            self.natural_key_author_widget.clean(json.dumps(self.author.natural_key())),
+            self.author,
+        )
+
+    def test_author_natural_key_render(self):
+        """
+        Ensure we can render an author by its natural key. Natural keys will always be
+        tuples.
+        """
+        self.assertEqual(
+            self.natural_key_author_widget.render(self.author),
+            json.dumps(self.author.natural_key()),
+        )
+
+    def test_book_natural_key_clean(self):
+        """
+        Use the book case to validate a composite natural key of book name and author
+        can be cleaned.
+        """
+        self.assertEqual(
+            self.natural_key_book_widget.clean(json.dumps(self.book.natural_key())),
+            self.book,
+        )
+
+    def test_book_natural_key_render(self):
+        """
+        Use the book case to validate a composite natural key of book name and author
+        can be rendered
+        """
+        self.assertEqual(
+            self.natural_key_book_widget.render(self.book),
+            json.dumps(self.book.natural_key()),
+        )
+
+    def test_natural_foreign_key_with_key_is_id(self):
+        with self.assertRaises(WidgetError) as e:
+            widgets.CachedForeignKeyWidget(
+                Author, use_natural_foreign_keys=True, key_is_id=True
+            )
+        self.assertEqual(
+            "use_natural_foreign_keys and key_is_id " "cannot both be True",
+            str(e.exception),
+        )
+
+    def test_with_related_fields(self):
+        author2 = Author.objects.create(name="Baz")
+        book = Book.objects.create(name="Baz", author=author2)
+        widget = widgets.CachedForeignKeyWidget(Book, "author__name")
+        with CaptureQueriesContext(connection) as ctx:
+            self.assertEqual(self.book, widget.clean(self.author.name))
+        self.assertEqual(len(ctx.captured_queries), 1)
+        with CaptureQueriesContext(connection) as ctx:
+            self.assertEqual(
+                book,
+                widget.clean(author2.name),
+            )
+        self.assertEqual(len(ctx.captured_queries), 0)
+
+
+class ManyToManyWidget(TestCase):
     def setUp(self):
         self.widget = widgets.ManyToManyWidget(Category)
         self.widget_name = widgets.ManyToManyWidget(Category, field="name")
@@ -737,7 +921,7 @@ class ManyToManyWidget(TestCase, RowDeprecationTestMixin):
         self.assertEqual("", self.widget.render(None))
 
 
-class JSONWidgetTest(TestCase, RowDeprecationTestMixin):
+class JSONWidgetTest(TestCase):
     def setUp(self):
         self.value = {"value": 23}
         self.widget = widgets.JSONWidget()
@@ -758,11 +942,25 @@ class JSONWidgetTest(TestCase, RowDeprecationTestMixin):
 
     def test_render_none(self):
         self.assertEqual(self.widget.render(None), None)
-        self.assertEqual(self.widget.render({}), None)
         self.assertEqual(self.widget.render({"value": None}), '{"value": null}')
 
+    def test_clean_falsy_json_strings(self):
+        self.assertEqual(self.widget.clean("0"), 0)
+        self.assertEqual(self.widget.clean("false"), False)
+        self.assertEqual(self.widget.clean("[]"), [])
+        self.assertEqual(self.widget.clean("{}"), {})
+        self.assertEqual(self.widget.clean('""'), "")
 
-class SimpleArrayWidgetTest(TestCase, RowDeprecationTestMixin):
+    def test_clean_empty_string(self):
+        self.assertIsNone(self.widget.clean(""))
+
+    def test_render_falsy_except_none(self):
+        for falsy in [0, "", False, [], {}]:
+            rendered = self.widget.render(falsy)
+            self.assertEqual(falsy, json.loads(rendered))
+
+
+class SimpleArrayWidgetTest(TestCase):
     def setUp(self):
         self.value = {"value": 23}
         self.widget = widgets.SimpleArrayWidget()

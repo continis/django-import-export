@@ -1,13 +1,10 @@
 import logging
-import warnings
 from urllib.parse import urlencode
 
-import django
 from django.conf import settings
 from django.contrib import admin, messages
 from django.contrib.admin.models import ADDITION, CHANGE, DELETION, LogEntry
 from django.contrib.auth import get_permission_codename
-from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import FieldError, PermissionDenied
 from django.forms import CharField, HiddenInput
 from django.http import HttpResponse, HttpResponseRedirect
@@ -20,7 +17,7 @@ from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_POST
 
 from .constants import FORM_FIELD_PREFIX
-from .formats.base_formats import BINARY_FORMATS
+from .formats.base_formats import get_binary_formats
 from .forms import ConfirmImportForm, ImportForm, SelectableFieldsExportForm
 from .mixins import BaseExportMixin, BaseImportMixin
 from .results import RowResult
@@ -231,31 +228,7 @@ class ImportMixin(BaseImportMixin, ImportExportMixinBase):
 
     def generate_log_entries(self, result, request):
         if not self.get_skip_admin_log():
-            # Add imported objects to LogEntry
-            if django.VERSION >= (5, 1):
-                self._log_actions(result, request)
-            else:
-                logentry_map = {
-                    RowResult.IMPORT_TYPE_NEW: ADDITION,
-                    RowResult.IMPORT_TYPE_UPDATE: CHANGE,
-                    RowResult.IMPORT_TYPE_DELETE: DELETION,
-                }
-                content_type_id = ContentType.objects.get_for_model(self.model).pk
-                for row in result:
-                    if row.import_type in logentry_map:
-                        with warnings.catch_warnings():
-                            cat = DeprecationWarning
-                            warnings.simplefilter("ignore", category=cat)
-                            LogEntry.objects.log_action(
-                                user_id=request.user.pk,
-                                content_type_id=content_type_id,
-                                object_id=row.object_id,
-                                object_repr=row.object_repr,
-                                action_flag=logentry_map[row.import_type],
-                                change_message=_(
-                                    "%s through import_export" % row.import_type
-                                ),
-                            )
+            self._log_actions(result, request)
 
     def add_success_message(self, result, request):
         opts = self.model._meta
@@ -686,6 +659,18 @@ class ExportMixin(BaseExportMixin, ImportExportMixinBase):
         changelist_kwargs["search_help_text"] = self.search_help_text
 
         class ExportChangeList(ChangeList):
+            def get_filters_params(self, params=None):
+                """Strip params not intended as queryset filters.
+
+                ``_changelist_filters`` is added by Django to change-view URLs
+                when the user navigated there from a filtered changelist.  It is
+                not a model field lookup and must be ignored, otherwise
+                ``ChangeList`` raises ``IncorrectLookupParameters``.
+                """
+                result = super().get_filters_params(params)
+                result.pop("_changelist_filters", None)
+                return result
+
             def get_results(self, request):
                 """
                 Overrides ChangeList.get_results() to bypass default operations like
@@ -712,7 +697,7 @@ class ExportMixin(BaseExportMixin, ImportExportMixinBase):
         if not self.has_export_permission(request):
             raise PermissionDenied
 
-        force_native_type = type(file_format) in BINARY_FORMATS
+        force_native_type = type(file_format) in get_binary_formats()
         data = self.get_data_for_export(
             request,
             queryset,

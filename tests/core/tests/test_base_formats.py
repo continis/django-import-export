@@ -5,7 +5,6 @@ from unittest import mock
 
 import openpyxl
 import tablib
-from core.tests.utils import ignore_utcnow_deprecation_warning
 from django.test import TestCase, override_settings
 from django.utils.encoding import force_str
 from tablib.core import UnsupportedFormat
@@ -98,7 +97,6 @@ class XLSXTest(TestCase):
     def test_binary_format(self):
         self.assertTrue(self.format.is_binary())
 
-    @ignore_utcnow_deprecation_warning
     def test_import(self):
         with open(self.filename, self.format.get_read_mode()) as in_stream:
             dataset = self.format.create_dataset(in_stream.read())
@@ -293,3 +291,57 @@ class YAMLFormatTest(TestCase):
         dataset.append((NumberWidget().render(1), "x"))
         res = base_formats.YAML().export_data(dataset)
         self.assertEqual("- {id: '1', username: x}\n", res)
+
+
+class GetDefaultFormatsTest(TestCase):
+    def setUp(self):
+        base_formats.get_default_formats.cache_clear()
+
+    def tearDown(self):
+        base_formats.get_default_formats.cache_clear()
+
+    def test_get_default_formats_returns_available_formats(self):
+        """Without IMPORT_EXPORT_FORMATS setting, returns all available formats."""
+        result = base_formats.get_default_formats()
+        self.assertIn(base_formats.CSV, result)
+        self.assertIn(base_formats.JSON, result)
+
+    @override_settings(IMPORT_EXPORT_FORMATS=[base_formats.CSV, base_formats.JSON])
+    def test_get_default_formats_respects_setting(self):
+        """With IMPORT_EXPORT_FORMATS set, returns only those formats."""
+        result = base_formats.get_default_formats()
+        self.assertEqual(result, [base_formats.CSV, base_formats.JSON])
+
+    @override_settings(IMPORT_EXPORT_FORMATS=[])
+    def test_get_default_formats_empty_setting(self):
+        """With IMPORT_EXPORT_FORMATS=[], returns empty list."""
+        result = base_formats.get_default_formats()
+        self.assertEqual(result, [])
+
+
+class GetBinaryFormatsTest(TestCase):
+    def setUp(self):
+        base_formats.get_binary_formats.cache_clear()
+        base_formats.get_default_formats.cache_clear()
+
+    def tearDown(self):
+        base_formats.get_binary_formats.cache_clear()
+        base_formats.get_default_formats.cache_clear()
+
+    def test_get_binary_formats_returns_binary_formats(self):
+        """Returns only binary-capable formats from default formats."""
+        result = base_formats.get_binary_formats()
+        self.assertIn(base_formats.XLSX, result)
+        self.assertNotIn(base_formats.CSV, result)
+
+    @override_settings(IMPORT_EXPORT_FORMATS=[base_formats.CSV])
+    def test_get_binary_formats_respects_setting(self):
+        """With only CSV enabled, no binary formats returned."""
+        result = base_formats.get_binary_formats()
+        self.assertEqual(result, [])
+
+    @override_settings(IMPORT_EXPORT_FORMATS=[base_formats.XLSX])
+    def test_get_binary_formats_with_xlsx_only(self):
+        """With only XLSX enabled, returns [XLSX]."""
+        result = base_formats.get_binary_formats()
+        self.assertEqual(result, [base_formats.XLSX])

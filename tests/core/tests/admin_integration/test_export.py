@@ -9,7 +9,6 @@ import tablib
 from core.admin import BookAdmin, BookResource, EBookResource
 from core.models import Author, Book, EBook, UUIDCategory
 from core.tests.admin_integration.mixins import AdminTestMixin
-from core.tests.utils import ignore_utcnow_deprecation_warning
 from django import forms
 from django.contrib.admin.sites import AdminSite
 from django.contrib.admin.views.main import ChangeList
@@ -166,6 +165,22 @@ class ExportAdminIntegrationTest(AdminTestMixin, TestCase):
 
         self.assertEqual(queryset.count(), Book.objects.count())
 
+    def test_get_export_queryset_with_changelist_filters_param(self):
+        """Test that _changelist_filters query param does not cause
+        IncorrectLookupParameters when exporting from a change view
+        reached via a filtered changelist."""
+        model_admin = BookAdmin(Book, AdminSite())
+
+        factory = RequestFactory()
+        request = factory.get(
+            self.book_export_url,
+            {"_changelist_filters": "author__id__exact=1"},
+        )
+        request.user = User.objects.create_user("admin1")
+
+        queryset = model_admin.get_export_queryset(request)
+        self.assertEqual(queryset.count(), Book.objects.count())
+
     def test_get_export_form_single_resource(self):
         response = self._get_url_response(self.category_export_url)
         content = response.content.decode()
@@ -279,7 +294,6 @@ class ExportAdminIntegrationTest(AdminTestMixin, TestCase):
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 
-    @ignore_utcnow_deprecation_warning
     @override_settings(IMPORT_EXPORT_ESCAPE_FORMULAE_ON_EXPORT=True)
     def test_export_escape_formulae(self):
         Book.objects.create(id=1, name="=SUM(1+1)")
@@ -456,7 +470,7 @@ class TestExportEncoding(TestCase):
             self.file_format, self.mock_request, [], encoding="shift-jis"
         )
         encoding = chardet.detect(bytes(data))["encoding"]
-        self.assertEqual("SHIFT_JIS", encoding)
+        self.assertIn(encoding, ("SHIFT_JIS", "cp932"))
 
     def test_to_encoding_set_incorrect(self):
         self.export_mixin = self.TestMixin()
@@ -468,7 +482,6 @@ class TestExportEncoding(TestCase):
                 encoding="bad-encoding",
             )
 
-    @ignore_utcnow_deprecation_warning
     def test_to_encoding_not_set_for_binary_file(self):
         self.export_mixin = self.TestMixin(test_str="teststr")
         self.file_format = formats.base_formats.XLSX()

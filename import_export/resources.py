@@ -1,5 +1,6 @@
 import functools
 import logging
+import types
 from collections import OrderedDict
 from copy import deepcopy
 from html import escape
@@ -73,6 +74,10 @@ class Resource(metaclass=DeclarativeMetaclass):
     representations and handle importing and exporting data.
     """
 
+    # Allow ``Resource[Model]`` subscription so resources can be parameterised
+    # with the model they operate on (used for typing).
+    __class_getitem__ = classmethod(types.GenericAlias)
+
     def __init__(self, **kwargs):
         """
         kwargs:
@@ -138,15 +143,6 @@ class Resource(metaclass=DeclarativeMetaclass):
         else:
             return self._meta.chunk_size
 
-    def get_fields(self, **kwargs):
-        warn(
-            "The 'get_fields()' method is deprecated and will be removed "
-            "in a future release",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return list(self.fields.values())
-
     def get_field_name(self, field):
         """
         Returns the field name for a given field.
@@ -198,7 +194,13 @@ class Resource(metaclass=DeclarativeMetaclass):
         ``import_id_fields`` are removed because `id` fields cannot be supplied to
         bulk_update().
         """
-        return [f for f in self.fields if f not in self._meta.import_id_fields]
+        return [
+            field.attribute
+            for field_name, field in self.fields.items()
+            if field_name not in self.get_import_id_fields()
+            and not field.readonly
+            and "__" not in field.attribute  # exclude related fields
+        ]
 
     def bulk_create(
         self, using_transactions, dry_run, raise_errors, batch_size=None, result=None
@@ -436,18 +438,6 @@ class Resource(metaclass=DeclarativeMetaclass):
                     continue
         return import_fields
 
-    def import_obj(self, obj, data, dry_run, **kwargs):
-        warn(
-            "The 'import_obj' method is deprecated and will be replaced "
-            "with 'import_instance(self, instance, row, **kwargs)' "
-            "in a future release.  Refer to Release Notes for details.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        if dry_run is True:
-            kwargs.update({"dry_run": dry_run})
-        self.import_instance(obj, data, **kwargs)
-
     def import_instance(self, instance, row, **kwargs):
         r"""
         Traverses every field in this Resource and calls
@@ -638,18 +628,6 @@ class Resource(metaclass=DeclarativeMetaclass):
             See :meth:`import_row`
         """
         pass
-
-    def after_import_instance(self, instance, new, row_number=None, **kwargs):
-        warn(
-            "The 'after_import_instance' method is deprecated and will be replaced "
-            "with 'after_init_instance(self, instance, new, row, **kwargs)' "
-            "in a future release.  Refer to Release Notes for details.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        if row_number is not None:
-            kwargs.update({"row_number": row_number})
-        self.after_init_instance(instance, new, None, **kwargs)
 
     def after_init_instance(self, instance, new, row, **kwargs):
         r"""

@@ -1,13 +1,14 @@
 import json
 import logging
 import numbers
+from collections import defaultdict, namedtuple
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
-from warnings import warn
 
 import django
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
+from django.db.models import F
 from django.utils import timezone
 from django.utils.dateparse import parse_duration
 from django.utils.encoding import force_str, smart_str
@@ -84,27 +85,16 @@ class Widget:
         """
         return value
 
-    def render(self, value, obj=None, **kwargs):
+    def render(self, value, **kwargs):
         """
         Returns an export representation of a python value.
 
         :param value: The python value to be rendered.
-        :param obj: The model instance from which the value is taken.
-          This parameter is deprecated and will be removed in a future release.
 
         :return: By default, this value will be a string, with ``None`` values returned
           as empty strings.
         """
         return force_str(value) if value is not None else ""
-
-    def _obj_deprecation_warning(self, obj):
-        if obj is not None:
-            warn(
-                "The 'obj' parameter is deprecated and will be removed "
-                "in a future release",
-                DeprecationWarning,
-                stacklevel=2,
-            )
 
 
 class NumberWidget(Widget):
@@ -118,8 +108,7 @@ class NumberWidget(Widget):
         # 0 is not empty
         return value is None or value == ""
 
-    def render(self, value, obj=None, **kwargs):
-        self._obj_deprecation_warning(obj)
+    def render(self, value, **kwargs):
         if self.coerce_to_string and not kwargs.get("force_native_type"):
             return (
                 ""
@@ -225,8 +214,7 @@ class CharWidget(Widget):
             return "" if self.allow_blank is True else None
         return force_str(val)
 
-    def render(self, value, obj=None, **kwargs):
-        self._obj_deprecation_warning(obj)
+    def render(self, value, **kwargs):
         if self.coerce_to_string:
             return "" if value is None else force_str(value)
         return value
@@ -272,7 +260,7 @@ class BooleanWidget(Widget):
             return None
         return True if value in self.TRUE_VALUES else False
 
-    def render(self, value, obj=None, **kwargs):
+    def render(self, value, **kwargs):
         """
         :return: ``True`` is represented as ``1``, ``False`` as ``0``, and
           ``None``/NULL as an empty string.
@@ -280,7 +268,6 @@ class BooleanWidget(Widget):
           If ``coerce_to_string`` is ``False``, the python Boolean type is
           returned (may be ``None``).
         """
-        self._obj_deprecation_warning(obj)
         if self.coerce_to_string and not kwargs.get("force_native_type"):
             if value in self.NULL_VALUES or not type(value) is bool:
                 return ""
@@ -318,8 +305,7 @@ class DateWidget(_ParseDateTimeMixin, Widget):
         """
         return self._parse_value(value, date)
 
-    def render(self, value, obj=None, **kwargs):
-        self._obj_deprecation_warning(obj)
+    def render(self, value, **kwargs):
         if self.coerce_to_string is False or kwargs.get("force_native_type"):
             return value
         if not value or not isinstance(value, date):
@@ -355,8 +341,7 @@ class DateTimeWidget(_ParseDateTimeMixin, Widget):
             return timezone.make_aware(dt)
         return dt
 
-    def render(self, value, obj=None, **kwargs):
-        self._obj_deprecation_warning(obj)
+    def render(self, value, **kwargs):
         if not value or not isinstance(value, datetime):
             return ""
         if settings.USE_TZ:
@@ -390,8 +375,7 @@ class TimeWidget(_ParseDateTimeMixin, Widget):
         """
         return self._parse_value(value, time)
 
-    def render(self, value, obj=None, **kwargs):
-        self._obj_deprecation_warning(obj)
+    def render(self, value, **kwargs):
         if self.coerce_to_string is False or kwargs.get("force_native_type"):
             return value
         if not value or not isinstance(value, time):
@@ -418,8 +402,7 @@ class DurationWidget(Widget):
             logger.debug(str(e))
             raise ValueError(_("Value could not be parsed."))
 
-    def render(self, value, obj=None, **kwargs):
-        self._obj_deprecation_warning(obj)
+    def render(self, value, **kwargs):
         if self.coerce_to_string is False or kwargs.get("force_native_type"):
             return value
         if value is None or not type(value) is timedelta:
@@ -455,14 +438,13 @@ class SimpleArrayWidget(Widget):
         """
         return value.split(self.separator) if value else []
 
-    def render(self, value, obj=None, **kwargs):
+    def render(self, value, **kwargs):
         """
         :return: A string with values separated by ``separator``.
           If ``coerce_to_string`` is ``False``, the native array will be returned.
           If ``value`` is None, None will be returned if ``coerce_to_string``
             is ``False``, otherwise an empty string will be returned.
         """
-        self._obj_deprecation_warning(obj)
         if value is None:
             return "" if self.coerce_to_string is True else None
         if not self.coerce_to_string:
@@ -494,21 +476,20 @@ class JSONWidget(Widget):
         :raises JSONDecodeError: If the value cannot be parsed as JSON.
         """
         val = super().clean(value)
-        if val:
+        if val is not None and val != "":
             try:
                 return json.loads(val)
             except json.decoder.JSONDecodeError:
                 return json.loads(val.replace("'", '"'))
 
-    def render(self, value, obj=None, **kwargs):
+    def render(self, value, **kwargs):
         """
         :return: A JSON formatted string derived from ``value``.
           ``coerce_to_string`` has no effect on the return value.
         """
-        self._obj_deprecation_warning(obj)
-        if value:
-            return json.dumps(value)
-        return None
+        if value is None:
+            return None
+        return json.dumps(value)
 
 
 class ForeignKeyWidget(Widget):
@@ -613,17 +594,23 @@ class ForeignKeyWidget(Widget):
         val = super().clean(value)
         if val:
             if self.use_natural_foreign_keys:
-                # natural keys will always be a tuple, which ends up as a json list.
-                value = json.loads(value)
-                return self.model.objects.get_by_natural_key(*value)
+                return self.get_instance_by_natural_key(value)
             else:
-                lookup_kwargs = self.get_lookup_kwargs(value, row, **kwargs)
-                obj = self.get_queryset(value, row, **kwargs).get(**lookup_kwargs)
+                obj = self.get_instance_by_lookup_fields(value, row, **kwargs)
                 if self.key_is_id:
                     return obj.pk
                 return obj
         else:
             return None
+
+    def get_instance_by_natural_key(self, value):
+        # natural keys will always be a tuple, which ends up as a json list.
+        value = json.loads(value)
+        return self.model.objects.get_by_natural_key(*value)
+
+    def get_instance_by_lookup_fields(self, value, row, **kwargs):
+        lookup_kwargs = self.get_lookup_kwargs(value, row, **kwargs)
+        return self.get_queryset(value, row, **kwargs).get(**lookup_kwargs)
 
     def get_lookup_kwargs(self, value, row, **kwargs):
         """
@@ -637,13 +624,12 @@ class ForeignKeyWidget(Widget):
         """
         return {self.field: value}
 
-    def render(self, value, obj=None, **kwargs):
+    def render(self, value, **kwargs):
         """
         :return: A string representation of the related value.
           If ``use_natural_foreign_keys``, the value's natural key is returned.
           ``coerce_to_string`` has no effect on the return value.
         """
-        self._obj_deprecation_warning(obj)
 
         if self.key_is_id:
             return value or ""
@@ -667,6 +653,143 @@ class ForeignKeyWidget(Widget):
                 return None
 
         return value
+
+
+class _CachedQuerySetWrapper:
+    """
+    A wrapper around a Django QuerySet that caches its results in a dictionary
+    for quick lookups.
+
+    This class has the same 'get()' method signature as a QuerySet
+    because it is intended to be used as a drop-in replacement for QuerySet
+    in case of ForeignKeyWidget that calls 'get()' method for every row
+    in the import dataset.
+    """
+
+    def __init__(self, queryset):
+        self.queryset = queryset
+        self.model = queryset.model
+
+    def _get_instances(self, queryset, key_cls):
+        """
+        Converts a queryset into a dictionary mapping lookup fields values
+        to lists of instances. The values of the returned dict are lists
+        to handle potential multiple instances with the same lookup fields values.
+        """
+        if hasattr(self, "_instances"):
+            return self._instances
+
+        self._instances = defaultdict(list)
+        for instance in queryset:
+            key = key_cls(
+                **{field: str(getattr(instance, field)) for field in key_cls._fields}
+            )
+            self._instances[key].append(instance)
+
+        return self._instances
+
+    def get(self, **lookup_fields):
+        Key = namedtuple("Key", list(lookup_fields.keys()))
+
+        instances = self._get_instances(self.queryset, Key)
+        key = Key(**{k: str(v) for k, v in lookup_fields.items()})
+        result = instances.get(key, [])
+
+        if len(result) == 1:
+            return result[0]
+
+        if len(result) == 0:
+            raise self.model.DoesNotExist(
+                "%s matching query does not exist." % self.model._meta.object_name
+            )
+        raise self.model.MultipleObjectsReturned(
+            "get() returned more than one %s -- it returned %s!"
+            % (self.model._meta.object_name, len(result))
+        )
+
+
+class CachedForeignKeyWidget(ForeignKeyWidget):
+    """
+    A :class:`~import_export.widgets.ForeignKeyWidget` subclass that caches
+    the queryset results to minimize database hits during import. The default
+    :class:`~import_export.widgets.ForeignKeyWidget` makes query for each row,
+    which can be inefficient for large imports. This widget fetches all related
+    instances once and caches them in memory for subsequent lookups.
+
+    Using this class has some limitations:
+
+    - It does not support caching when ``use_natural_foreign_keys=True`` is set.
+
+    - It calls :meth:`~import_export.widgets.ForeignKeyWidget.get_queryset` only once,
+      so if the queryset depends on the row data, this widget may not work as expected.
+      You must be sure that the queryset is static for all rows.
+      Avoid using :class:`~import_export.widgets.CachedForeignKeyWidget`
+      in the following way::
+
+            class FullNameForeignKeyWidget(CachedForeignKeyWidget):
+                def get_queryset(self, value, row, *args, **kwargs):
+                    return self.model.objects.filter(
+                        first_name__iexact=row["first_name"],
+                        last_name__iexact=row["last_name"]
+                    )
+
+      It makes more sense to filter by static values::
+
+            class ActiveForeignKeyWidget(CachedForeignKeyWidget):
+                def get_queryset(self, value, row, *args, **kwargs):
+                    return self.model.objects.filter(active=True)
+
+    - It stores data in a hash table where the key is a tuple of the fields that
+      returned by :meth:`~import_export.widgets.ForeignKeyWidget.get_lookup_kwargs`.
+      You must be sure that the lookup fields are the same for all rows.
+      If the lookup fields differ between rows, this widget may not work as expected.
+      The following example is incorrect usage::
+
+            class MultiColumnForeignKeyWidget(CachedForeignKeyWidget):
+                def get_lookup_kwargs(self, value, row, **kwargs):
+                    if row['active'] == 'yes':
+                        return {self.field: value, 'active': True}
+                    else:
+                        return {self.field: value, 'inactive': True}
+
+    - It does not support complex lookups like ``__gt`` or ``__lt`` in the
+    ``get_lookup_kwargs()``.
+      For example, the following code won't work::
+
+            class BookForeignKeyWidget(CachedForeignKeyWidget):
+                def get_lookup_kwargs(self, value, row, **kwargs):
+                    return {f'{self.field}__gt': value}
+
+    :param model: The Model the ForeignKey refers to (required).
+    :param field: A field on the related model used for looking up a particular
+        object.
+    :param use_natural_foreign_keys: Use natural key functions to identify
+        related object, default to False
+    """
+
+    def _contains_relations(self):
+        return "__" in self.field
+
+    def get_queryset(self, value, row, *args, **kwargs):
+        queryset = super().get_queryset(value, row, *args, **kwargs)
+        if self._contains_relations():
+            queryset = queryset.annotate(
+                django_import_export_cached_lookup=F(self.field)
+            )
+        return queryset
+
+    def get_lookup_kwargs(self, value, row, **kwargs):
+        if self._contains_relations():
+            return {"django_import_export_cached_lookup": value}
+        return super().get_lookup_kwargs(value, row, **kwargs)
+
+    def get_instance_by_lookup_fields(self, value, row, **kwargs):
+        if not hasattr(self, "_cached_qs"):
+            queryset = self.get_queryset(value, row, **kwargs)
+            self._cached_qs = _CachedQuerySetWrapper(queryset)
+
+        lookup_kwargs = self.get_lookup_kwargs(value, row, **kwargs)
+        return self._cached_qs.get(**lookup_kwargs)
 
 
 class ManyToManyWidget(Widget):
@@ -713,13 +836,12 @@ class ManyToManyWidget(Widget):
             ids = filter(None, [i.strip() for i in ids])
         return self.model.objects.filter(**{"%s__in" % self.field: ids})
 
-    def render(self, value, obj=None, **kwargs):
+    def render(self, value, **kwargs):
         """
         :return: A string with values separated by ``separator``.
           ``None`` values are returned as empty strings.
           ``coerce_to_string`` has no effect on the return value.
         """
-        self._obj_deprecation_warning(obj)
         if value is not None:
             ids = [smart_str(getattr(obj, self.field)) for obj in value.all()]
             return self.separator.join(ids)

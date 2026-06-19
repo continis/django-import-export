@@ -15,24 +15,82 @@ Breaking changes
   a result of this change.
 
   The ``resource``, ``format`` and ``export_items`` field names are now prepended with ``django-import-export-``.
-  
-* Removed the deprecated :meth:`~import_export.admin.ExportMixin.get_valid_export_item_pks` method in favour
-  of :meth:`~import_export.admin.ExportMixin.get_queryset`. Use the ModelAdmin's
-  :meth:`~import_export.admin.ExportMixin.get_queryset` or :meth:`~import_export.admin.ExportMixin.get_export_queryset`
-  instead.
-
-  See `PR 1890 <https://github.com/django-import-export/django-import-export/issues/1890>`_.
 
 * Fixed issue where export forms were incorrectly showing import fields instead of export fields.
   This was resolved by introducing context-specific methods for field retrieval.
   See :ref:`deprecations <deprecations_v5>` and `PR 2118 <https://github.com/django-import-export/django-import-export/pull/2118>`_.
+
+* `PR 2145 <https://github.com/django-import-export/django-import-export/issues/2145>`_ enhanced the fields included in bulk updates.
+  Read-only fields and related fields (those with ``__`` in the attribute) are excluded from bulk update.
+  This PR also fixed an issue where field name is used instead of attribute name, which is incorrect.
+  If you have enabled ``use_bulk`` for imports then please test and ensure rows are still updated as expected.
+
+* :class:`~import_export.widgets.JSONWidget` previously used truthy checks on values in both ``clean()`` and
+  ``render()``, which meant that valid falsy JSON values such as ``0``, ``False``, ``[]`` and ``{}`` were silently
+  treated as ``None``.  This has been fixed so that these values are now correctly parsed and rendered.
+  If you have any import or export logic which depends on the previous (incorrect) behaviour of returning ``None``
+  for these values, you may need to update it.
+  See `PR 2143 <https://github.com/django-import-export/django-import-export/pull/2143>`_ and
+  `issue 2153 <https://github.com/django-import-export/django-import-export/issues/2153>`_.
+
+* The ``DEFAULT_FORMATS`` and ``BINARY_FORMATS`` module-level constants in ``import_export.formats.base_formats``
+  have been replaced with ``get_default_formats()`` and ``get_binary_formats()`` functions
+  (`#2149 <https://github.com/django-import-export/django-import-export/issues/2149>`_).
+
+  This avoids expensive third-party library imports (openpyxl, xlrd, etc.) at Django startup when formats are
+  disabled via the ``IMPORT_EXPORT_FORMATS`` setting.
+
+  **Migration**: replace::
+
+    from import_export.formats.base_formats import DEFAULT_FORMATS
+
+  with::
+
+    from import_export.formats.base_formats import get_default_formats
+    formats = get_default_formats()
+
+Removed deprecations
+""""""""""""""""""""
+
+The following items, deprecated since v4.0, have been removed:
+
+* The ``get_valid_export_item_pks()`` method has been removed.
+  Use the ModelAdmin's ``get_queryset()`` or
+  :meth:`~import_export.admin.ExportMixin.get_export_queryset` instead.
+  See `PR 1890 <https://github.com/django-import-export/django-import-export/issues/1890>`_.
+
+* The ``Resource.import_obj()`` method has been removed.
+  Use :meth:`~import_export.resources.Resource.import_instance` instead.
+
+* The ``Resource.after_import_instance()`` method has been removed.
+  Use :meth:`~import_export.resources.Resource.after_init_instance` instead.
+
+* The ``Resource.get_fields()`` method (deprecated since v4.1) has been removed.
+  This method is no longer called internally.
+
+* The ``obj`` parameter of :meth:`~import_export.widgets.Widget.render` has been removed.
+  The ``render()`` method signature is now ``render(self, value, **kwargs)``.
+
+* The ``resource_class`` attribute on admin mixins has been removed.
+  Use ``resource_classes`` (a list) instead.
+
+* The ``get_resource_class()`` method on admin mixins has been removed.
+  Use ``get_resource_classes()`` instead.
+
+* The ``get_import_resource_class()`` method has been removed.
+  Use ``get_import_resource_classes()`` instead.
+
+* The ``get_export_resource_class()`` method has been removed.
+  Use ``get_export_resource_classes()`` instead.
+
+* The ``ExportViewMixin`` and ``ExportViewFormMixin`` classes have been removed.
 
 .. _deprecations_v5:
 
 Deprecations
 ^^^^^^^^^^^^
 
-* The :meth:`~import_export.resources.Resource.get_user_visible_fields` method is now deprecated and will be removed in version 6.0.
+* The :meth:`~import_export.resources.Resource.get_user_visible_fields` method is deprecated and will be removed in version 6.0.
   Use :meth:`~import_export.resources.Resource.get_user_visible_import_fields` for import contexts and
   :meth:`~import_export.resources.Resource.get_user_visible_export_fields` for export contexts instead.
   This change ensures that import and export operations show their respective field sets correctly in admin forms.
@@ -41,13 +99,13 @@ v4.2
 ----
 
 * When exporting via :ref:`admin action<export_via_admin_action>`, the queryset is now filtered on
-  :meth:`~import_export.admin.ExportMixin.get_queryset` instead of the Model's default queryset.
+  ``get_queryset()`` instead of the Model's default queryset.
   This should have no impact on existing implementations.
 
-  This change also made :meth:`~import_export.admin.ExportMixin.get_valid_export_item_pks` obsolete, as the
+  This change also made ``get_valid_export_item_pks()`` obsolete, as the
   ModelAdmin's :meth:`~import_export.admin.ExportMixin.get_export_queryset`, or
-  ModelAdmin's get_queryset can be used instead.
-  The :meth:`~import_export.admin.ExportMixin.get_valid_export_item_pks` method is now deprecated.
+  ModelAdmin's ``get_queryset()`` can be used instead.
+  The ``get_valid_export_item_pks()`` method is now deprecated.
 
   See `PR 1890 <https://github.com/django-import-export/django-import-export/issues/1890>`_.
 

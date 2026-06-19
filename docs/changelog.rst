@@ -12,6 +12,22 @@ Changelog
 - Add support for Django 6.0, remove support for Python 3.9 (`2112 <https://github.com/django-import-export/django-import-export/pull/2112>`_)
 - Fix Admin UI form field name collision for exports (`2108 <https://github.com/django-import-export/django-import-export/pull/2108>`_)
 - Removed the deprecated :meth:`~import_export.admin.ExportMixin.get_valid_export_item_pks` method in favour of :meth:`~import_export.admin.ExportMixin.get_queryset` (`1898 <https://github.com/django-import-export/django-import-export/pull/1898>`_)
+- Refactor bulk updates to use attribute not field (`2145 <https://github.com/django-import-export/django-import-export/issues/2145>`_)
+- Replace ``DEFAULT_FORMATS`` and ``BINARY_FORMATS`` constants with ``get_default_formats()`` and ``get_binary_formats()`` functions to avoid expensive library imports at Django startup (`2149 <https://github.com/django-import-export/django-import-export/issues/2149>`_)
+- Allow ``Resource`` subclasses to be subscripted, e.g. ``ModelResource[MyModel]`` (`2069 <https://github.com/django-import-export/django-import-export/issues/2069>`_)
+
+4.4.1 (2026-05-05)
+-------------------
+
+- Refactor lookup value retrieval in Field and CachedForeignKeyWidget (`2146 <https://github.com/django-import-export/django-import-export/pull/2146>`_)
+- Fix IncorrectLookupParameters when exporting from filtered change view (`2154 <https://github.com/django-import-export/django-import-export/pull/2154>`_)
+- Fix console error 'resource select input not found' on export (`2158 <https://github.com/django-import-export/django-import-export/pull/2158>`_)
+- Fix CachedForeignKeyWidget type mismatch on non-string lookup fields (`2159 <https://github.com/django-import-export/django-import-export/pull/2159>`_)
+
+4.4.0 (2026-01-10)
+-------------------
+
+- Added CachedForeignKeyWidget (`2142 <https://github.com/django-import-export/django-import-export/pull/2142>`_)
 
 4.3.14 (2025-11-13)
 -------------------

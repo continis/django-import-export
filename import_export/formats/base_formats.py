@@ -3,7 +3,7 @@
 # e.g. add openpyxl imports to the XLSXFormat class
 # See issue 2004
 import logging
-import warnings
+from functools import lru_cache
 
 import tablib
 from django.conf import settings
@@ -225,24 +225,18 @@ class XLSX(TablibFormat):
     def export_data(self, dataset, **kwargs):
         from openpyxl.utils.exceptions import IllegalCharacterError
 
-        # #1698 temporary catch for deprecation warning in openpyxl
-        # this catch block must be removed when openpyxl updated
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=DeprecationWarning)
-            try:
+        try:
+            return super().export_data(dataset, **kwargs)
+        except IllegalCharacterError as e:
+            if (
+                getattr(settings, "IMPORT_EXPORT_ESCAPE_ILLEGAL_CHARS_ON_EXPORT", False)
+                is True
+            ):
+                self._escape_illegal_chars(dataset)
                 return super().export_data(dataset, **kwargs)
-            except IllegalCharacterError as e:
-                if (
-                    getattr(
-                        settings, "IMPORT_EXPORT_ESCAPE_ILLEGAL_CHARS_ON_EXPORT", False
-                    )
-                    is True
-                ):
-                    self._escape_illegal_chars(dataset)
-                    return super().export_data(dataset, **kwargs)
-                logger.exception(e)
-                # not raising original error due to reflected xss risk
-                raise ValueError(_("export failed due to IllegalCharacterError"))
+            logger.exception(e)
+            # not raising original error due to reflected xss risk
+            raise ValueError(_("export failed due to IllegalCharacterError"))
 
     def _escape_illegal_chars(self, dataset):
         from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
@@ -258,31 +252,27 @@ class XLSX(TablibFormat):
             dataset.append(row)
 
 
-#: These are the default formats for import and export. Whether they can be
-#: used or not is depending on their implementation in the tablib library.
-DEFAULT_FORMATS = [
-    fmt
-    for fmt in (
-        CSV,
-        XLS,
-        XLSX,
-        TSV,
-        ODS,
-        JSON,
-        YAML,
-        HTML,
-    )
-    if fmt.is_available()
-]
+_ALL_FORMATS = (CSV, XLS, XLSX, TSV, ODS, JSON, YAML, HTML)
+_BINARY_FORMAT_TYPES = (XLS, XLSX, ODS)
 
-#: These are the formats which support different data types (such as datetime
-#: and numbers) for which `coerce_to_string` is to be set false dynamically.
-BINARY_FORMATS = [
-    fmt
-    for fmt in (
-        XLS,
-        XLSX,
-        ODS,
-    )
-    if fmt.is_available()
-]
+
+@lru_cache(maxsize=None)
+def get_default_formats():
+    """Return the list of available formats, respecting IMPORT_EXPORT_FORMATS setting.
+
+    Results are cached for the lifetime of the process.
+    """
+    configured = getattr(settings, "IMPORT_EXPORT_FORMATS", None)
+    if configured is not None:
+        return list(configured)
+    return [fmt for fmt in _ALL_FORMATS if fmt.is_available()]
+
+
+@lru_cache(maxsize=None)
+def get_binary_formats():
+    """Return the list of binary formats from the default formats.
+
+    Results are cached for the lifetime of the process.
+    """
+    default = get_default_formats()
+    return [fmt for fmt in _BINARY_FORMAT_TYPES if fmt in default]
